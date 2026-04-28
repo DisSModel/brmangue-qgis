@@ -10,11 +10,11 @@ from __future__ import annotations
 from qgis.PyQt.QtWidgets import (
     QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QCheckBox, 
     QComboBox, QPushButton, QLineEdit, QGroupBox, QVBoxLayout, 
-    QHBoxLayout, QProgressBar, QTextEdit, QApplication 
+    QHBoxLayout, QProgressBar, QTextEdit, QTextBrowser, QApplication 
 )
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsApplication, QgsMessageLog, Qgis
-
+from .experiment_panel import ExperimentPanel
 
 class BrmangueDialog(QDialog):
     def __init__(self, parent=None):
@@ -122,10 +122,14 @@ class BrmangueDialog(QDialog):
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
         
-        self.log = QTextEdit()
+        self.log = QTextBrowser()
         self.log.setReadOnly(True)
         self.log.setFixedHeight(120) # Aumentei um pouco para caber a citação
         self.log.setStyleSheet("font-size: 11px; font-family: monospace;")
+
+        self.log.setOpenExternalLinks(False)
+        self.log.anchorClicked.connect(self._handle_log_link)
+
         self._log("Aguardando submissão.")
 
         # NOVO BOTÃO FAIR (Começa invisível)
@@ -252,8 +256,11 @@ class BrmangueDialog(QDialog):
         fair_metadata = fair_metadata or {}
         
         self._set_running(False)
-        self._log(f"✅ Concluído — ID: {experiment_id}")
-        self._log(f"📂 Abrindo camada: {result_uri}")
+     
+        
+        link_html = f'<a href="{experiment_id}" style="color: #3498db; text-decoration: underline;">{experiment_id}</a>'
+        self.log.append(f"✅ Concluído — ID: {link_html}")
+        self.log.append(f"📂 Abrindo camada: {result_uri}")
 
         # Monta a citação com os dados que vieram do servidor
         model_name = fair_metadata.get("model_name", "brmangue")
@@ -299,6 +306,21 @@ class BrmangueDialog(QDialog):
         self._log(f"❌ Falha: {message}")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _handle_log_link(self, url):
+        """Disparado quando o usuário clica em um hiperlink dentro do QTextEdit (Log)"""
+        experiment_id = url.toString()
+        
+        # Pega as credenciais atuais preenchidas na interface
+        server_url = self.server_url.text().strip().rstrip("/")
+        api_key = self.api_key.text().strip()
+        
+        if server_url and api_key:
+            # Instancia e exibe o painel independente
+            panel = ExperimentPanel(experiment_id, server_url, api_key, parent=self)
+            panel.exec_()
+        else:
+            self._log("❌ Erro: URL do servidor e API Key são necessárias para consultar o experimento.")
 
     def _log(self, message: str):
         self.log.append(message)
