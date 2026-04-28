@@ -110,15 +110,51 @@ class BrmangueDialog(QDialog):
 
     def _buttons(self) -> QHBoxLayout:
         layout = QHBoxLayout()
+
+        # --- NOVO BOTÃO DE PREVIEW ---
+        self.btn_preview = QPushButton("👀 Pré-visualizar")
+        self.btn_preview.setToolTip("Carrega o dataset de entrada no mapa antes de simular")
+        self.btn_preview.clicked.connect(self._preview)
+
         self.btn_submit = QPushButton("▶ Submeter Job")
         self.btn_submit.setDefault(True)
         self.btn_submit.clicked.connect(self._submit)
+
         self.btn_close = QPushButton("Fechar")
         self.btn_close.clicked.connect(self.close)
+
         layout.addStretch()
+        layout.addWidget(self.btn_preview) # Adicionado à interface
         layout.addWidget(self.btn_submit)
         layout.addWidget(self.btn_close)
         return layout
+
+    # --- NOVA FUNÇÃO ---
+    def _preview(self):
+        uri = self.input_uri.text().strip()
+        
+        if not uri:
+            self._log("❌ Erro: Insira a URI do dataset para pré-visualizar.")
+            return
+
+        self._log(f"👀 Carregando pré-visualização de {uri}...")
+        
+        server_url = self.server_url.text().strip().rstrip("/")
+        api_key = self.api_key.text().strip()
+        
+        # Pega as bandas que o usuário marcou para visualizar
+        bands = []
+        if self.band_uso.isChecked():  bands.append("uso")
+        if self.band_solo.isChecked(): bands.append("solo")
+        if self.band_alt.isChecked():  bands.append("alt")
+
+        try:
+            from .symbology import load_result
+            # Chama a mesma função, mas passa "Preview Entrada" em vez de um Job ID
+            load_result(uri, "Preview Entrada", bands, server_url, api_key)
+            self._log("✅ Pré-visualização carregada com sucesso!")
+        except Exception as e:
+            self._log(f"❌ Erro ao carregar pré-visualização: {str(e)}")
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
