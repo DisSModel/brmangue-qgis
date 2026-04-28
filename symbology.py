@@ -1,133 +1,121 @@
 # -*- coding: utf-8 -*-
-"""
-symbology.py
-------------
-Downloads the result GeoTIFF from the platform and loads it into QGIS
-with automatic band symbology derived from pre-defined .qml style files.
-
-One layer is added per requested band, named with the experiment_id so
-runs are easy to identify in the Layers panel.
-"""
-
 from __future__ import annotations
-
 import os
-import tempfile
 import requests
+from qgis.core import (
+    QgsRasterLayer, QgsProject, QgsPalettedRasterRenderer,
+    QgsSingleBandGrayRenderer, QgsContrastEnhancement
+)
+from qgis.PyQt.QtGui import QColor
 
-from qgis.core import QgsRasterLayer, QgsProject
+# Mapeamento de índices (Banda 1 = uso, 2 = alt, 3 = solo)
+BAND_MAP = {
+    "uso": 1,
+    "alt": 2,
+    "solo": 3
+}
 
+USO_COLORS = {
+    1: "#006400", 2: "#808000", 3: "#00008b", 4: "#ffd700", 5: "#ffdead",
+    6: "#000000", 7: "#323232", 8: "#00ff00", 9: "#ff0000", 10: "#000000"
+}
+USO_LABELS = {
+    1: "Mangue", 2: "Vegetação Terrestre", 3: "Mar", 4: "Área Antropizada",
+    5: "Solo Descoberto", 6: "Solo Inundado", 7: "Área Antrop. Inundada",
+    8: "Mangue Migrado", 9: "Mangue Inundado", 10: "Veg. Terrestre Inundada"
+}
+
+SOLO_COLORS = {
+    0: "#0000ff", 1: "#6699cc", 2: "#aaaaaa", 3: "#006400", 4: "#888888", 9: "#228b22"
+}
+SOLO_LABELS = {
+    0: "Canal Fluvial", 1: "Leito de Rio", 2: "Podzólico",
+    3: "Mangue", 4: "Outros", 9: "Mangue Migrado"
+}
 
 STYLES_DIR = os.path.join(os.path.dirname(__file__), "styles")
+BAND_STYLES = {"uso": "brmangue_uso.qml", "solo": "brmangue_solo.qml", "alt": "brmangue_alt.qml"}
 
-# Maps canonical band name → QML file bundled with the plugin.
-# QML files are generated once interactively in QGIS using
-# USO_COLORS / USO_LABELS from brmangue.common.constants.
-BAND_STYLES: dict[str, str] = {
-    "uso":  "brmangue_uso.qml",
-    "solo": "brmangue_solo.qml",
-    "alt":  "brmangue_alt.qml",
-}
-
-# GDAL open options to select a single band by name.
-# Requires GDAL >= 3.x with band description support.
-BAND_INDEX: dict[str, int] = {
-    "uso":  1,
-    "solo": 2,
-    "alt":  3,
-}
-
-
-def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None):
-    """
-    Load result GeoTIFF and apply pre-defined QML symbology per band.
-
-    If result_uri is an s3:// URI, the file is downloaded to a temp
-    directory first (requires the platform to expose a presigned URL
-    or the server to proxy the download).
-
-    Parameters
-    ----------
-    result_uri    : URI returned by the platform (local path or s3://)
-    experiment_id : used to name layers in the QGIS Layers panel
-    bands         : list of band names to load; defaults to all available
-    """
-    bands = bands or list(BAND_STYLES.keys())
-
-    local_path = _ensure_local(result_uri, experiment_id)
-    if local_path is None:
+def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None,
+                server_url: str = "http://127.0.0.1:8000", api_key: str = ""):
+    
+    bands_to_load = bands if bands else ["uso", "solo", "alt"]
+    path = _resolve_vsi_path(result_uri, server_url, api_key)
+    if not path:
         return
 
-    for band_name in bands:
-        if band_name not in BAND_STYLES:
+    for band_name in bands_to_load:
+        band_index = BAND_MAP.get(band_name)
+        if not band_index:
             continue
 
         layer_name = f"{experiment_id} — {band_name}"
-        layer      = QgsRasterLayer(local_path, layer_name)
+        layer = QgsRasterLayer(path, layer_name)
 
         if not layer.isValid():
-            print(f"[brmangue-qgis] Could not load layer for band '{band_name}'")
             continue
 
-        _apply_style(layer, band_name)
+        _apply_style_smart(layer, band_name, band_index)
         QgsProject.instance().addMapLayer(layer)
 
-
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def _apply_style(layer: QgsRasterLayer, band_name: str):
-    """Load QML style file for band_name if it exists."""
+def _apply_style_smart(layer: QgsRasterLayer, band_name: str, band_index: int):
+    """Plano A: Carrega QML. Plano B: Gera simbologia programática."""
     qml_file = BAND_STYLES.get(band_name)
-    if qml_file is None:
-        return
+    qml_path = os.path.join(STYLES_DIR, qml_file) if qml_file else ""
 
-    qml_path = os.path.join(STYLES_DIR, qml_file)
-    if not os.path.exists(qml_path):
-        print(
-            f"[brmangue-qgis] Style file not found: {qml_path}\n"
-            f"  Generate it in QGIS: Layer → Save as Style → QML"
-        )
-        return
-
-    layer.loadNamedStyle(qml_path)
+    if qml_path and os.path.exists(qml_path):
+        layer.loadNamedStyle(qml_path)
+    else:
+        if band_name == "uso":
+            _apply_paletted_renderer(layer, USO_COLORS, USO_LABELS, band_index)
+        elif band_name == "solo":
+            _apply_paletted_renderer(layer, SOLO_COLORS, SOLO_LABELS, band_index)
+        elif band_name == "alt":
+            _apply_continuous_gray_renderer(layer, band_index)
+    
     layer.triggerRepaint()
 
+def _apply_paletted_renderer(layer: QgsRasterLayer, color_dict: dict, label_dict: dict, band_index: int):
+    """Legenda de valores únicos (Paletizada)."""
+    provider = layer.dataProvider()
+    classes = []
+    for val, hex_c in color_dict.items():
+        classes.append(QgsPalettedRasterRenderer.Class(val, QColor(hex_c), label_dict.get(val, str(val))))
+    
+    renderer = QgsPalettedRasterRenderer(provider, band_index, classes)
+    layer.setRenderer(renderer)
 
-def _ensure_local(uri: str, experiment_id: str) -> str | None:
-    """
-    Return a local file path for the result.
+def _apply_continuous_gray_renderer(layer: QgsRasterLayer, band_index: int):
+    """Legenda contínua em escala de cinza para altitude."""
+    provider = layer.dataProvider()
+    
+    # Criar o renderizador forçando a banda de altitude
+    renderer = QgsSingleBandGrayRenderer(provider, band_index)
+    
+    # Calcular estatísticas da banda para definir o estiramento de contraste (Min/Max)
+    stats = provider.bandStatistics(band_index)
+    min_val = stats.minimumValue
+    max_val = stats.maximumValue
 
-    - If uri is already a local path, return it directly.
-    - If uri starts with s3://, attempt to download via the platform's
-      presigned URL endpoint.
-    - If download fails, logs a warning and returns None.
-    """
-    if not uri.startswith("s3://"):
-        return uri if os.path.exists(uri) else None
+    # Configurar o gradiente (Preto para o mínimo, Branco para o máximo)
+    renderer.setGradient(QgsSingleBandGrayRenderer.BlackToWhite)
+    
+    # Criar e configurar o realce de contraste
+    enhancement = QgsContrastEnhancement(provider.dataType(band_index))
+    enhancement.setContrastEnhancementAlgorithm(QgsContrastEnhancement.StretchToMinimumMaximum)
+    enhancement.setMinimumValue(min_val)
+    enhancement.setMaximumValue(max_val)
+    
+    renderer.setContrastEnhancement(enhancement)
+    layer.setRenderer(renderer)
 
-    # s3:// → try to get a presigned download URL from the platform
-    # This requires the platform to expose GET /download?uri=<s3_uri>
-    # Adjust the endpoint to match your DisSModel Platform setup.
+def _resolve_vsi_path(uri: str, server_url: str, api_key: str) -> str | None:
+    if not uri.startswith("s3://"): return uri
     try:
-        presigned_resp = requests.get(
-            f"http://200.137.132.34:8000/download",
-            params  = {"uri": uri},
-            timeout = 30,
-        )
-        presigned_resp.raise_for_status()
-        download_url = presigned_resp.json().get("url")
-
-        tmp_dir  = tempfile.mkdtemp(prefix="brmangue_")
-        tmp_path = os.path.join(tmp_dir, f"{experiment_id}.tif")
-
-        with requests.get(download_url, stream=True, timeout=120) as r:
-            r.raise_for_status()
-            with open(tmp_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-        return tmp_path
-
-    except Exception as exc:
-        print(f"[brmangue-qgis] Could not download result from {uri}: {exc}")
+        resp = requests.get(f"{server_url}/download", params={"uri": uri}, 
+                            headers={"X-API-Key": api_key}, timeout=10)
+        resp.raise_for_status()
+        return f"/vsicurl/{resp.json()['url']}"
+    except Exception as e:
+        print(f"[brmangue-qgis] Erro na resolução VSI: {e}")
         return None
