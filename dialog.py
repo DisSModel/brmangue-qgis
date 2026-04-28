@@ -50,14 +50,36 @@ class BrmangueDialog(QDialog):
         return box
 
     def _group_input(self) -> QGroupBox:
-        box = QGroupBox("Dataset de Entrada")
+        box    = QGroupBox("Dataset de Entrada")
         layout = QFormLayout(box)
+
+        # Layout horizontal para a URI e o botão Preview lado a lado
+        uri_layout = QHBoxLayout()
+
         self.input_uri = QLineEdit()
         self.input_uri.setPlaceholderText("s3://dissmodel-inputs/ilha_maranhao.tif")
+
+        # Criação do botão de Preview aqui
+        self.btn_preview = QPushButton("👀 Preview")
+        self.btn_preview.setToolTip("Carrega o dataset no mapa antes de simular")
+        self.btn_preview.clicked.connect(self._preview)
+
+        # Adiciona o campo de texto e o botão ao layout horizontal
+        uri_layout.addWidget(self.input_uri)
+        uri_layout.addWidget(self.btn_preview)
+
         self.input_format = QComboBox()
         self.input_format.addItems(["auto", "tiff", "vector"])
-        layout.addRow("URI do dataset:", self.input_uri)
-        layout.addRow("Formato:", self.input_format)
+        self.input_format.setToolTip(
+            "auto: detecta pelo sufixo do arquivo\n"
+            "tiff: GeoTIFF com bandas uso/alt/solo\n"
+            "vector: GeoPackage ou Shapefile rasterizado no servidor"
+        )
+
+        # Adiciona a linha inteira ao FormLayout
+        layout.addRow("URI do dataset:", uri_layout)
+        layout.addRow("Formato:",        self.input_format)
+        
         return box
 
     def _group_parameters(self) -> QGroupBox:
@@ -111,12 +133,7 @@ class BrmangueDialog(QDialog):
     def _buttons(self) -> QHBoxLayout:
         layout = QHBoxLayout()
 
-        # --- NOVO BOTÃO DE PREVIEW ---
-        self.btn_preview = QPushButton("👀 Pré-visualizar")
-        self.btn_preview.setToolTip("Carrega o dataset de entrada no mapa antes de simular")
-        self.btn_preview.clicked.connect(self._preview)
-
-        self.btn_submit = QPushButton("▶ Submeter Job")
+        self.btn_submit = QPushButton("▶  Submeter Job")
         self.btn_submit.setDefault(True)
         self.btn_submit.clicked.connect(self._submit)
 
@@ -124,23 +141,27 @@ class BrmangueDialog(QDialog):
         self.btn_close.clicked.connect(self.close)
 
         layout.addStretch()
-        layout.addWidget(self.btn_preview) # Adicionado à interface
         layout.addWidget(self.btn_submit)
         layout.addWidget(self.btn_close)
         return layout
 
-    # --- NOVA FUNÇÃO ---
+    
     def _preview(self):
         uri = self.input_uri.text().strip()
+        api_key = self.api_key.text().strip()
+        server_url = self.server_url.text().strip().rstrip("/")
         
+        # 1. Trava da URI
         if not uri:
             self._log("❌ Erro: Insira a URI do dataset para pré-visualizar.")
             return
+            
+        # 2. Trava da API Key (Nova)
+        if not api_key:
+            self._log("❌ Erro: Insira a API Key (chave de acesso) para baixar a pré-visualização.")
+            return
 
         self._log(f"👀 Carregando pré-visualização de {uri}...")
-        
-        server_url = self.server_url.text().strip().rstrip("/")
-        api_key = self.api_key.text().strip()
         
         # Pega as bandas que o usuário marcou para visualizar
         bands = []
