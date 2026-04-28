@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import requests
 from qgis.core import (
-    QgsRasterLayer, QgsProject, QgsPalettedRasterRenderer
+    QgsRasterLayer, QgsProject, QgsPalettedRasterRenderer,
+    QgsSingleBandGrayRenderer, QgsContrastEnhancement
 )
 from qgis.PyQt.QtGui import QColor
 
@@ -33,14 +34,12 @@ SOLO_LABELS = {
 }
 
 STYLES_DIR = os.path.join(os.path.dirname(__file__), "styles")
-BAND_STYLES = {"uso": "brmangue_uso.qml", "solo": "brmangue_solo.qml"}
+BAND_STYLES = {"uso": "brmangue_uso.qml", "solo": "brmangue_solo.qml", "alt": "brmangue_alt.qml"}
 
 def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None,
                 server_url: str = "http://127.0.0.1:8000", api_key: str = ""):
     
-    # Se o usuário não marcou nada no Dialog, bandas vem como lista vazia ou None
     bands_to_load = bands if bands else ["uso", "solo", "alt"]
-    
     path = _resolve_vsi_path(result_uri, server_url, api_key)
     if not path:
         return
@@ -51,10 +50,6 @@ def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = N
             continue
 
         layer_name = f"{experiment_id} — {band_name}"
-        
-        # Carregamos a camada. Importante: Para garantir que o QGIS foque na banda certa
-        # em alguns casos de renderização, poderíamos passar o parâmetro de banda na URI,
-        # mas aqui vamos setar via Renderer que é mais flexível.
         layer = QgsRasterLayer(path, layer_name)
 
         if not layer.isValid():
@@ -64,34 +59,54 @@ def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = N
         QgsProject.instance().addMapLayer(layer)
 
 def _apply_style_smart(layer: QgsRasterLayer, band_name: str, band_index: int):
-    """Aplica o estilo usando o índice correto da banda."""
+    """Plano A: Carrega QML. Plano B: Gera simbologia programática."""
     qml_file = BAND_STYLES.get(band_name)
     qml_path = os.path.join(STYLES_DIR, qml_file) if qml_file else ""
 
-    # Se o QML existir, ele deve estar configurado internamente para a banda certa
     if qml_path and os.path.exists(qml_path):
         layer.loadNamedStyle(qml_path)
     else:
-        # Se falhar o QML, geramos o renderizador manual apontando para o índice correto
         if band_name == "uso":
             _apply_paletted_renderer(layer, USO_COLORS, USO_LABELS, band_index)
         elif band_name == "solo":
             _apply_paletted_renderer(layer, SOLO_COLORS, SOLO_LABELS, band_index)
         elif band_name == "alt":
-            # Para altimetria (dados contínuos), o QGIS geralmente usa o SinglebandGray por padrão
-            pass 
+            _apply_continuous_gray_renderer(layer, band_index)
     
     layer.triggerRepaint()
 
 def _apply_paletted_renderer(layer: QgsRasterLayer, color_dict: dict, label_dict: dict, band_index: int):
-    """Constrói o renderizador usando o band_index fornecido."""
+    """Legenda de valores únicos (Paletizada)."""
     provider = layer.dataProvider()
     classes = []
     for val, hex_c in color_dict.items():
         classes.append(QgsPalettedRasterRenderer.Class(val, QColor(hex_c), label_dict.get(val, str(val))))
     
-    # Trocamos o '1' fixo pelo 'band_index' dinâmico
     renderer = QgsPalettedRasterRenderer(provider, band_index, classes)
+    layer.setRenderer(renderer)
+
+def _apply_continuous_gray_renderer(layer: QgsRasterLayer, band_index: int):
+    """Legenda contínua em escala de cinza para altitude."""
+    provider = layer.dataProvider()
+    
+    # Criar o renderizador forçando a banda de altitude
+    renderer = QgsSingleBandGrayRenderer(provider, band_index)
+    
+    # Calcular estatísticas da banda para definir o estiramento de contraste (Min/Max)
+    stats = provider.bandStatistics(band_index)
+    min_val = stats.minimumValue
+    max_val = stats.maximumValue
+
+    # Configurar o gradiente (Preto para o mínimo, Branco para o máximo)
+    renderer.setGradient(QgsSingleBandGrayRenderer.BlackToWhite)
+    
+    # Criar e configurar o realce de contraste
+    enhancement = QgsContrastEnhancement(provider.dataType(band_index))
+    enhancement.setContrastEnhancementAlgorithm(QgsContrastEnhancement.StretchToMinimumMaximum)
+    enhancement.setMinimumValue(min_val)
+    enhancement.setMaximumValue(max_val)
+    
+    renderer.setContrastEnhancement(enhancement)
     layer.setRenderer(renderer)
 
 def _resolve_vsi_path(uri: str, server_url: str, api_key: str) -> str | None:
