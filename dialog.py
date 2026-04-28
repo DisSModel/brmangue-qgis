@@ -164,44 +164,42 @@ class BrmangueDialog(QDialog):
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _submit(self):
-            from qgis.core import QgsMessageLog, Qgis
+            from qgis.core import QgsMessageLog, Qgis, QgsApplication  # <--- Adicione QgsApplication aqui
             QgsMessageLog.logMessage("Botão pressionado, iniciando submissão...", "BR-MANGUE UI", Qgis.Info)
             
-            import json  # <--- Adicione aqui
+            import json
             from .payload_builder import build_payload
             from .task import BrmangueTask
 
             params = self._collect_params()
 
-            if not params["input_uri"]:
-                self._log("⚠  Informe o URI do dataset de entrada.")
-                return
-            if not params["api_key"]:
-                self._log("⚠  Informe a API Key.")
-                return
+            # ... (validações de input_uri e api_key)
 
             payload = build_payload(params)
             
-            # --- INÍCIO DO FEEDBACK EXTRA ---
-            # Isso vai imprimir no Console Python do QGIS (Ctrl+Alt+P)
-            print("\n" + "="*40)
-            print(f"[BR-MANGUE] Tentando enviar para: {params['server_url']}")
+            # Feedback no console
             print(f"[BR-MANGUE] Payload:\n{json.dumps(payload, indent=2)}")
-            print("="*40 + "\n")
-            # --------------------------------
 
             self._log(f"Submetendo job para {params['server_url']} ...")
             self._set_running(True)
 
-            task = BrmangueTask(
-                payload    = payload,
-                server_url = params["server_url"],
-                api_key    = params["api_key"],
-                bands      = params["bands"],
-                on_done    = self._on_done,
-                on_error   = self._on_error,
-            )
-            QgsApplication.taskManager().addTask(task)
+            try:
+                task = BrmangueTask(
+                    payload    = payload,
+                    server_url = params["server_url"],
+                    api_key    = params["api_key"],
+                    bands      = params["bands"],
+                    on_done    = self._on_done,
+                    on_error   = self._on_error,
+                )
+                
+                # Agora com a referência correta ao QgsApplication
+                QgsApplication.taskManager().addTask(task)
+                QgsMessageLog.logMessage("Tarefa adicionada ao TaskManager com sucesso.", "BR-MANGUE UI", Qgis.Info)
+                
+            except Exception as e:
+                self._log(f"❌ Erro ao criar Task: {str(e)}")
+                self._set_running(False)
 
     def _collect_params(self) -> dict:
         bands = []
