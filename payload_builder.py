@@ -17,9 +17,9 @@ def build_payload(params: dict) -> dict:
         "parameters": {
             "end_time":      params["end_time"],
             "resolution":    params.get("resolution", 100.0),
-            "taxa_elevacao": params["taxa_elevacao"],
-            "altura_mare":   params["altura_mare"],
-            "acrecao_ativa": params["acrecao_ativa"],
+            #"taxa_elevacao": params["taxa_elevacao"],
+            #"altura_mare":   params["altura_mare"],
+            #"acrecao_ativa": params["acrecao_ativa"],
         },
     }
 

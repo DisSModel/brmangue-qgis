@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 import requests
-from qgis.core import QgsTask
+from qgis.core import QgsTask, QgsMessageLog, Qgis
 
 
 POLL_INTERVAL_SEC = 4
@@ -63,16 +63,21 @@ class BrmangueTask(QgsTask):
 
     # ── QgsTask interface ─────────────────────────────────────────────────────
 
+    # Função auxiliar para logar bonitinho no painel do QGIS
+    def _log(self, msg: str, level=Qgis.Info):
+        QgsMessageLog.logMessage(msg, "BR-MANGUE Task", level)
+
     def run(self) -> bool:
-        """
-        Runs in background thread.
-        Returns True on success, False on failure or cancellation.
-        """
+        self._log("1. Thread em segundo plano iniciada!")
         try:
             if not self._submit():
+                self._log("5. _submit retornou False. Abortando.", Qgis.Warning)
                 return False
+            
+            self._log("6. _submit passou. Iniciando _poll()...")
             return self._poll()
         except Exception as exc:
+            self._log(f"EXCEÇÃO CRÍTICA NA THREAD: {exc}", Qgis.Critical)
             self.error_msg = str(exc)
             return False
 
@@ -89,23 +94,36 @@ class BrmangueTask(QgsTask):
     # ── Internal steps ────────────────────────────────────────────────────────
 
     def _submit(self) -> bool:
-        """POST /submit_job and store the experiment_id."""
-        resp = requests.post(
-            f"{self.server_url}/submit_job",
-            json    = self.payload,           # era: {"toml_spec": self.toml_str}
-            headers = self.headers,
-            timeout = REQUEST_TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        self._log(f"2. Preparando POST para: {self.server_url}/submit_job")
+        try:
+            resp = requests.post(
+                f"{self.server_url}/submit_job",
+                json    = self.payload,
+                headers = self.headers,
+                timeout = 10,
+            )
+            self._log(f"3. Servidor respondeu com status: {resp.status_code}")
+            
+            if not resp.ok:
+                self.error_msg = f"Erro da API: {resp.status_code} - {resp.text}"
+                self._log(f"Erro detalhado: {resp.text}", Qgis.Critical)
+                return False
 
-        self.experiment_id = data.get("job_id")  # API retorna job_id, não experiment_id
-        if not self.experiment_id:
-            self.error_msg = "Servidor não retornou job_id"
+            data = resp.json()
+            self.experiment_id = data.get("job_id")
+            
+            if not self.experiment_id:
+                self.error_msg = "Servidor não retornou job_id"
+                return False
+
+            self._log(f"4. Sucesso! Job ID: {self.experiment_id}")
+            self.setDescription(f"BR-MANGUE — {self.experiment_id}")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            self._log(f"FALHA DE REDE: {e}", Qgis.Critical)
+            self.error_msg = f"Falha de conexão: {str(e)}"
             return False
-
-        self.setDescription(f"BR-MANGUE — {self.experiment_id}")
-        return True
 
     def _poll(self) -> bool:
         while not self.isCanceled():

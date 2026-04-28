@@ -51,7 +51,7 @@ class BrmangueDialog(QDialog):
         box    = QGroupBox("Servidor DisSModel Platform")
         layout = QFormLayout(box)
 
-        self.server_url = QLineEdit("http://localhost:8000")
+        self.server_url = QLineEdit("http://127.0.0.1:8000")
         self.api_key    = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
         self.api_key.setPlaceholderText("chave de acesso")
@@ -164,31 +164,41 @@ class BrmangueDialog(QDialog):
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _submit(self):
-        from .payload_builder import build_payload
-        from .task import BrmangueTask
+            import json  # <--- Adicione aqui
+            from .payload_builder import build_payload
+            from .task import BrmangueTask
 
-        params = self._collect_params()
+            params = self._collect_params()
 
-        if not params["input_uri"]:
-            self._log("⚠  Informe o URI do dataset de entrada.")
-            return
-        if not params["api_key"]:
-            self._log("⚠  Informe a API Key.")
-            return
+            if not params["input_uri"]:
+                self._log("⚠  Informe o URI do dataset de entrada.")
+                return
+            if not params["api_key"]:
+                self._log("⚠  Informe a API Key.")
+                return
 
-        payload = build_payload(params)
-        self._log(f"Submetendo job para {params['server_url']} ...")
-        self._set_running(True)
+            payload = build_payload(params)
+            
+            # --- INÍCIO DO FEEDBACK EXTRA ---
+            # Isso vai imprimir no Console Python do QGIS (Ctrl+Alt+P)
+            print("\n" + "="*40)
+            print(f"[BR-MANGUE] Tentando enviar para: {params['server_url']}")
+            print(f"[BR-MANGUE] Payload:\n{json.dumps(payload, indent=2)}")
+            print("="*40 + "\n")
+            # --------------------------------
 
-        task = BrmangueTask(
-            payload    = payload,
-            server_url = params["server_url"],
-            api_key    = params["api_key"],
-            bands      = params["bands"],
-            on_done    = self._on_done,
-            on_error   = self._on_error,
-        )
-        QgsApplication.taskManager().addTask(task)
+            self._log(f"Submetendo job para {params['server_url']} ...")
+            self._set_running(True)
+
+            task = BrmangueTask(
+                payload    = payload,
+                server_url = params["server_url"],
+                api_key    = params["api_key"],
+                bands      = params["bands"],
+                on_done    = self._on_done,
+                on_error   = self._on_error,
+            )
+            QgsApplication.taskManager().addTask(task)
 
     def _collect_params(self) -> dict:
         bands = []

@@ -39,7 +39,7 @@ BAND_INDEX: dict[str, int] = {
 
 
 def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None,
-                server_url: str = "http://localhost:8000", api_key: str = ""):
+                server_url: str = "http://127.0.0.1:8000", api_key: str = ""):
     bands = bands or list(BAND_STYLES.keys())
     local_path = _ensure_local(result_uri, experiment_id, server_url, api_key)
     if local_path is None:
@@ -80,7 +80,7 @@ def _apply_style(layer: QgsRasterLayer, band_name: str):
     layer.triggerRepaint()
 
 
-def _ensure_local(uri: str, experiment_id: str, server_url: str = "http://localhost:8000", api_key: str = "") -> str | None:
+def _ensure_local(uri: str, experiment_id: str, server_url: str = "http://127.0.0.1:8000", api_key: str = "") -> str | None:
     if not uri.startswith("s3://"):
         return uri if os.path.exists(uri) else None
 
