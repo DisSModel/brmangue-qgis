@@ -92,31 +92,27 @@ class BrmangueTask(QgsTask):
         """POST /submit_job and store the experiment_id."""
         resp = requests.post(
             f"{self.server_url}/submit_job",
-            json    = {"toml_spec": self.toml_str},
+            json    = self.payload,           # era: {"toml_spec": self.toml_str}
             headers = self.headers,
             timeout = REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
 
-        self.experiment_id = data.get("experiment_id")
+        self.experiment_id = data.get("job_id")  # API retorna job_id, não experiment_id
         if not self.experiment_id:
-            self.error_msg = "Servidor não retornou experiment_id"
+            self.error_msg = "Servidor não retornou job_id"
             return False
 
         self.setDescription(f"BR-MANGUE — {self.experiment_id}")
         return True
 
     def _poll(self) -> bool:
-        """
-        Poll GET /experiments/{id} until status is completed or failed.
-        Respects task cancellation between polls.
-        """
         while not self.isCanceled():
             time.sleep(POLL_INTERVAL_SEC)
 
             resp = requests.get(
-                f"{self.server_url}/experiments/{self.experiment_id}",
+                f"{self.server_url}/job/{self.experiment_id}",  # era /experiments/{id}
                 headers = self.headers,
                 timeout = REQUEST_TIMEOUT,
             )
@@ -136,9 +132,7 @@ class BrmangueTask(QgsTask):
                 self.error_msg = logs[-1] if logs else "Job falhou sem mensagem de erro"
                 return False
 
-            # still running — update progress description
             self.setDescription(f"BR-MANGUE — {self.experiment_id} [{status}]")
 
-        # task was cancelled by user
         self.error_msg = "Cancelado pelo usuário"
         return False

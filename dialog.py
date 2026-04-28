@@ -51,7 +51,7 @@ class BrmangueDialog(QDialog):
         box    = QGroupBox("Servidor DisSModel Platform")
         layout = QFormLayout(box)
 
-        self.server_url = QLineEdit("http://200.137.132.34:8000")
+        self.server_url = QLineEdit("http://localhost:8000")
         self.api_key    = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
         self.api_key.setPlaceholderText("chave de acesso")
@@ -215,7 +215,12 @@ class BrmangueDialog(QDialog):
         self._log(f"✅ Concluído — experimento {experiment_id}")
         self._log(f"   Resultado: {result_uri}")
         from .symbology import load_result
-        load_result(result_uri, experiment_id)
+        load_result(
+            result_uri,
+            experiment_id,
+            server_url = self.server_url.text().rstrip("/"),
+            api_key    = self.api_key.text().strip(),
+        )
 
     def _on_error(self, message: str):
         self._set_running(False)

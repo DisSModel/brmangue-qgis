@@ -38,23 +38,10 @@ BAND_INDEX: dict[str, int] = {
 }
 
 
-def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None):
-    """
-    Load result GeoTIFF and apply pre-defined QML symbology per band.
-
-    If result_uri is an s3:// URI, the file is downloaded to a temp
-    directory first (requires the platform to expose a presigned URL
-    or the server to proxy the download).
-
-    Parameters
-    ----------
-    result_uri    : URI returned by the platform (local path or s3://)
-    experiment_id : used to name layers in the QGIS Layers panel
-    bands         : list of band names to load; defaults to all available
-    """
+def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None,
+                server_url: str = "http://localhost:8000", api_key: str = ""):
     bands = bands or list(BAND_STYLES.keys())
-
-    local_path = _ensure_local(result_uri, experiment_id)
+    local_path = _ensure_local(result_uri, experiment_id, server_url, api_key)
     if local_path is None:
         return
 
@@ -93,25 +80,17 @@ def _apply_style(layer: QgsRasterLayer, band_name: str):
     layer.triggerRepaint()
 
 
-def _ensure_local(uri: str, experiment_id: str) -> str | None:
-    """
-    Return a local file path for the result.
-
-    - If uri is already a local path, return it directly.
-    - If uri starts with s3://, attempt to download via the platform's
-      presigned URL endpoint.
-    - If download fails, logs a warning and returns None.
-    """
+def _ensure_local(uri: str, experiment_id: str, server_url: str = "http://localhost:8000", api_key: str = "") -> str | None:
     if not uri.startswith("s3://"):
         return uri if os.path.exists(uri) else None
 
-    # s3:// → try to get a presigned download URL from the platform
-    # This requires the platform to expose GET /download?uri=<s3_uri>
-    # Adjust the endpoint to match your DisSModel Platform setup.
     try:
+        headers = {"X-API-Key": api_key} if api_key else {}
+
         presigned_resp = requests.get(
-            f"http://200.137.132.34:8000/download",
+            f"{server_url}/download",
             params  = {"uri": uri},
+            headers = headers,
             timeout = 30,
         )
         presigned_resp.raise_for_status()
