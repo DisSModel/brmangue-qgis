@@ -36,10 +36,16 @@ SOLO_LABELS = {
 STYLES_DIR = os.path.join(os.path.dirname(__file__), "styles")
 BAND_STYLES = {"uso": "brmangue_uso.qml", "solo": "brmangue_solo.qml", "alt": "brmangue_alt.qml"}
 
-def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None,
+
+
+def load_result(result_uri: str, prefix: str, bands: list[str] | None = None,
                 server_url: str = "http://127.0.0.1:8000", api_key: str = ""):
-    
+    """
+    Carrega o raster no QGIS. 
+    'prefix' pode ser o ID do Experimento ou a palavra 'Preview'.
+    """
     bands_to_load = bands if bands else ["uso", "solo", "alt"]
+    
     path = _resolve_vsi_path(result_uri, server_url, api_key)
     if not path:
         return
@@ -49,7 +55,8 @@ def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = N
         if not band_index:
             continue
 
-        layer_name = f"{experiment_id} — {band_name}"
+        # Aqui usamos o 'prefix' para dar nome à camada
+        layer_name = f"{prefix} — {band_name}"
         layer = QgsRasterLayer(path, layer_name)
 
         if not layer.isValid():
