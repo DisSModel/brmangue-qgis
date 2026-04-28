@@ -164,6 +164,9 @@ class BrmangueDialog(QDialog):
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _submit(self):
+            from qgis.core import QgsMessageLog, Qgis
+            QgsMessageLog.logMessage("Botão pressionado, iniciando submissão...", "BR-MANGUE UI", Qgis.Info)
+            
             import json  # <--- Adicione aqui
             from .payload_builder import build_payload
             from .task import BrmangueTask
