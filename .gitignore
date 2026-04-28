@@ -1,0 +1,52 @@
+### --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+### --- QGIS / UI ---
+# Arquivos de interface compilados (se você usar o Qt Designer)
+resources.py
+ui_*.py
+
+### --- IDEs & Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+### --- Sistema & Logs ---
+.DS_Store
+Thumbs.db
+*.log
+
+### --- DisSModel / Simulation Context ---
+# Ignorar arquivos TOML temporários gerados para teste local
+temp_config.toml
+# Se você salvar resultados temporários localmente antes de subir no MinIO
+/temp_results/
+*.tif
+*.tiff
+# Exceto se você tiver algum tiff de exemplo pequeno na pasta data/
+!data/*.tif
+
+### --- OS Specific ---
+.directory
