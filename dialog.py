@@ -17,8 +17,9 @@ from qgis.PyQt.QtWidgets import (
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsApplication, QgsMessageLog, Qgis
 
-# Importa o painel de experimento
-from .experiment_panel import ExperimentPanel
+import html as _html
+from qgis.PyQt.QtCore import QUrl
+from qgis.PyQt.QtGui  import QTextCursor, QTextCharFormat
 
 
 class BrmangueDialog(QDialog):
@@ -247,17 +248,20 @@ class BrmangueDialog(QDialog):
     # ── Callbacks (Chamados via task.finished na Thread Principal) ───────────
 
     def _handle_log_link(self, url):
-        """Abre o painel de experimento ao clicar no ID no log."""
+        # Cancela a navegação imediatamente — sem isso o QTextBrowser
+        # "navega" para a URL e limpa o conteúdo do widget.
+        self.log.setSource(QUrl())
+
         experiment_id = url.toString()
         server_url = self.server_url.text().strip().rstrip("/")
-        api_key = self.api_key.text().strip()
-        
+        api_key    = self.api_key.text().strip()
+
         if server_url and api_key:
-            # Abre a nova janela
+            from .experiment_panel import ExperimentPanel
             panel = ExperimentPanel(experiment_id, server_url, api_key, parent=self)
             panel.exec_()
         else:
-            self._log("❌ Erro: URL do servidor e API Key são necessárias para consultar o experimento.")
+            self._log("❌ URL do servidor e API Key são necessárias para consultar o experimento.")
 
     def _on_done(self, result_uri: str, experiment_id: str, fair_metadata: dict = None):
         """Executado quando a tarefa termina com sucesso."""
@@ -289,8 +293,22 @@ class BrmangueDialog(QDialog):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _log(self, message: str):
-        self.log.append(message)
-        # Scroll para o final automático
+        cursor = self.log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.log.setTextCursor(cursor)
+
+        if "<a " in message:
+            # Insere o HTML do link
+            self.log.insertHtml(message + "<br/>")
+            # Move para o fim e RESETA o formato — quebra o contexto do <a>
+            cursor = self.log.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.setCharFormat(QTextCharFormat())   # sem cor, sem sublinhado
+            self.log.setTextCursor(cursor)
+        else:
+            # Texto puro: escapa e insere como HTML neutro
+            self.log.insertHtml(_html.escape(message) + "<br/>")
+
         self.log.ensureCursorVisible()
 
     def _set_running(self, running: bool):
