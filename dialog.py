@@ -8,12 +8,18 @@ Main submission dialog for brmangue-qgis.
 from __future__ import annotations
 
 from qgis.PyQt.QtWidgets import (
-    QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QCheckBox, 
-    QComboBox, QPushButton, QLineEdit, QGroupBox, QVBoxLayout, 
-    QHBoxLayout, QProgressBar, QTextEdit, QApplication 
+    QDialog, QFormLayout, QDoubleSpinBox,
+    QSpinBox, QCheckBox, QComboBox,
+    QPushButton, QLineEdit, QLabel,
+    QGroupBox, QVBoxLayout, QHBoxLayout,
+    QProgressBar, QTextBrowser  # <-- Trocado de QTextEdit para QTextBrowser
 )
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsApplication, QgsMessageLog, Qgis
+
+import html as _html
+from qgis.PyQt.QtCore import QUrl
+from qgis.PyQt.QtGui  import QTextCursor, QTextCharFormat
 
 
 class BrmangueDialog(QDialog):
@@ -21,7 +27,6 @@ class BrmangueDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("BR-MANGUE — Coastal Simulation Platform")
         self.setMinimumWidth(480)
-        self.current_citation = ""
         self._build_ui()
 
     # ── UI Construction ───────────────────────────────────────────────────────
@@ -75,7 +80,6 @@ class BrmangueDialog(QDialog):
             "vector: GeoPackage ou Shapefile rasterizado no servidor"
         )
 
-        # Adiciona a linha inteira ao FormLayout
         layout.addRow("URI do dataset:", uri_layout)
         layout.addRow("Formato:",        self.input_format)
         
@@ -117,26 +121,23 @@ class BrmangueDialog(QDialog):
     def _group_status(self) -> QGroupBox:
         box = QGroupBox("Status")
         layout = QVBoxLayout(box)
-        
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
         
-        self.log = QTextEdit()
+        # ── CONFIGURAÇÃO PARA LINKS CLICÁVEIS ──
+        self.log = QTextBrowser()
         self.log.setReadOnly(True)
-        self.log.setFixedHeight(120) # Aumentei um pouco para caber a citação
+        self.log.setFixedHeight(100)
         self.log.setStyleSheet("font-size: 11px; font-family: monospace;")
+        
+        # Faz com que o QGIS gerencie os cliques em vez do navegador do sistema
+        self.log.setOpenExternalLinks(False)
+        self.log.anchorClicked.connect(self._handle_log_link)
+        
         self._log("Aguardando submissão.")
-
-        # NOVO BOTÃO FAIR (Começa invisível)
-        self.btn_copy_fair = QPushButton("📋 Copiar Citação FAIR")
-        self.btn_copy_fair.setVisible(False)
-        self.btn_copy_fair.clicked.connect(self._copy_fair)
-
         layout.addWidget(self.progress)
         layout.addWidget(self.log)
-        layout.addWidget(self.btn_copy_fair) # Adicionado ao final do box
-        
         return box
 
     def _buttons(self) -> QHBoxLayout:
@@ -154,7 +155,8 @@ class BrmangueDialog(QDialog):
         layout.addWidget(self.btn_close)
         return layout
 
-    
+    # ── Actions ───────────────────────────────────────────────────────────────
+
     def _preview(self):
         uri = self.input_uri.text().strip()
         api_key = self.api_key.text().strip()
@@ -165,7 +167,7 @@ class BrmangueDialog(QDialog):
             self._log("❌ Erro: Insira a URI do dataset para pré-visualizar.")
             return
             
-        # 2. Trava da API Key (Nova)
+        # 2. Trava da API Key
         if not api_key:
             self._log("❌ Erro: Insira a API Key (chave de acesso) para baixar a pré-visualização.")
             return
@@ -186,45 +188,43 @@ class BrmangueDialog(QDialog):
         except Exception as e:
             self._log(f"❌ Erro ao carregar pré-visualização: {str(e)}")
 
-    # ── Actions ───────────────────────────────────────────────────────────────
 
     def _submit(self):
-        """Prepara o payload e lança a QgsTask."""
-        import json
-        from .payload_builder import build_payload
-        from .task import BrmangueTask
-
-        params = self._collect_params()
-        
-        # Validação simples
-        if not params["input_uri"] or not params["api_key"]:
-            self._log("❌ Erro: Preencha a URI e a API Key.")
-            return
-
-        payload = build_payload(params)
-        
-        # Log no console do QGIS para debug
-        QgsMessageLog.logMessage(f"Payload: {json.dumps(payload)}", "BR-MANGUE", Qgis.Info)
-
-        self._log(f"Submetendo job para {params['server_url']} ...")
-        self._set_running(True)
-
         try:
-            # Criamos a tarefa passando nossas funções locais de callback
-            task = BrmangueTask(
+            import json
+            from .payload_builder import build_payload
+            from .task import BrmangueTask
+
+            params = self._collect_params()
+            
+            if not params["input_uri"] or not params["api_key"]:
+                self._log("❌ Erro: Preencha a URI e a API Key.")
+                return
+
+            payload = build_payload(params)
+            
+            QgsMessageLog.logMessage(f"Payload: {json.dumps(payload)}", "BR-MANGUE", Qgis.Info)
+
+            self._log(f"Submetendo job para {params['server_url']} ...")
+            self._set_running(True)
+            
+            self.active_task = BrmangueTask(
                 payload    = payload,
                 server_url = params["server_url"],
                 api_key    = params["api_key"],
                 bands      = params["bands"],
-                on_done    = self._on_done,    # Será chamada pela thread principal
-                on_error   = self._on_error    # Será chamada pela thread principal
+                on_done    = self._on_done,    
+                on_error   = self._on_error    
             )
             
-            QgsApplication.taskManager().addTask(task)
+            QgsApplication.taskManager().addTask(self.active_task)
             self._log("Job enviado! Monitorando servidor...")
             
         except Exception as e:
-            self._log(f"❌ Erro ao criar Task: {str(e)}")
+            import traceback
+            erro_completo = traceback.format_exc()
+            self._log(f"🔥 ERRO CRÍTICO ANTES DE ENVIAR: {str(e)}")
+            QgsMessageLog.logMessage(erro_completo, "BR-MANGUE", Qgis.Critical)
             self._set_running(False)
 
     def _collect_params(self) -> dict:
@@ -247,51 +247,43 @@ class BrmangueDialog(QDialog):
 
     # ── Callbacks (Chamados via task.finished na Thread Principal) ───────────
 
-    # Adicione fair_metadata como argumento (padrão {} para evitar erros)
+    def _handle_log_link(self, url):
+        # Cancela a navegação imediatamente — sem isso o QTextBrowser
+        # "navega" para a URL e limpa o conteúdo do widget.
+        self.log.setSource(QUrl())
+
+        experiment_id = url.toString()
+        server_url = self.server_url.text().strip().rstrip("/")
+        api_key    = self.api_key.text().strip()
+
+        if server_url and api_key:
+            from .experiment_panel import ExperimentPanel
+            panel = ExperimentPanel(experiment_id, server_url, api_key, parent=self)
+            panel.exec_()
+        else:
+            self._log("❌ URL do servidor e API Key são necessárias para consultar o experimento.")
+
     def _on_done(self, result_uri: str, experiment_id: str, fair_metadata: dict = None):
-        fair_metadata = fair_metadata or {}
-        
+        """Executado quando a tarefa termina com sucesso."""
         self._set_running(False)
-        self._log(f"✅ Concluído — ID: {experiment_id}")
-        self._log(f"📂 Abrindo camada: {result_uri}")
-
-        # Monta a citação com os dados que vieram do servidor
-        model_name = fair_metadata.get("model_name", "brmangue")
-        code_ver = fair_metadata.get("code_version", "1.0")
-        commit = str(fair_metadata.get("model_commit", "unknown"))[:8]
-        sha256 = str(fair_metadata.get("output_sha256", "unknown"))[:12]
-
-        self.current_citation = (
-            f"DisSModel v{code_ver} "
-            f"(spec: {model_name}@{commit}, "
-            f"output sha256: {sha256}...)"
-        )
         
-        # Exibe no Log de forma destacada
-        self._log("\n--- CITAÇÃO FAIR ---")
-        self._log(self.current_citation)
-        self._log("--------------------\n")
-        
-        # Faz o botão de copiar aparecer
-        self.btn_copy_fair.setVisible(True)
+        # ── CRIA O LINK HTML CLICÁVEL ──
+        link_html = f'<a href="{experiment_id}" style="color: #3498db; text-decoration: underline;">{experiment_id}</a>'
+        self.log.append(f"✅ Concluído — ID: {link_html}")
+        self.log.append(f"📂 Abrindo camada...")
 
         try:
             from .symbology import load_result
             load_result(
                 result_uri,
                 experiment_id,
-                bands      = self._collect_params()["bands"], # Pega as bandas atuais
+                bands      = self._collect_params()["bands"],
                 server_url = self.server_url.text().strip().rstrip("/"),
                 api_key    = self.api_key.text().strip(),
             )
         except Exception as e:
             self._log(f"❌ Erro ao carregar resultado no mapa: {str(e)}")
-
-    # Nova função que executa quando o botão é clicado
-    def _copy_fair(self):
-        if self.current_citation:
-            QApplication.clipboard().setText(self.current_citation)
-            self._log("📋 Citação FAIR copiada para a área de transferência!")
+            QgsMessageLog.logMessage(f"Erro no load_result: {str(e)}", "BR-MANGUE", Qgis.Critical)
 
     def _on_error(self, message: str):
         """Executado quando a tarefa falha ou é cancelada."""
@@ -301,8 +293,22 @@ class BrmangueDialog(QDialog):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _log(self, message: str):
-        self.log.append(message)
-        # Scroll para o final automático
+        cursor = self.log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.log.setTextCursor(cursor)
+
+        if "<a " in message:
+            # Insere o HTML do link
+            self.log.insertHtml(message + "<br/>")
+            # Move para o fim e RESETA o formato — quebra o contexto do <a>
+            cursor = self.log.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.setCharFormat(QTextCharFormat())   # sem cor, sem sublinhado
+            self.log.setTextCursor(cursor)
+        else:
+            # Texto puro: escapa e insere como HTML neutro
+            self.log.insertHtml(_html.escape(message) + "<br/>")
+
         self.log.ensureCursorVisible()
 
     def _set_running(self, running: bool):

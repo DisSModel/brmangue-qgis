@@ -45,15 +45,22 @@ class BrmangueTask(QgsTask):
 
     def run(self) -> bool:
         """Lógica executada em background thread."""
+        self._log(">>> THREAD BACKGROUND INICIADA! <<<")
         try:
             # 1. Submissão
+            self._log("Indo para _submit()...")
             if not self._submit():
+                self._log("Falha no _submit()! Retornando False.")
                 return False
             
             # 2. Monitoramento (Polling)
+            self._log("Indo para _poll()...")
             return self._poll()
             
         except Exception as exc:
+            import traceback
+            erro = traceback.format_exc()
+            self._log(f"🔥 ERRO CRÍTICO NA THREAD: {erro}", Qgis.Critical)
             self.error_msg = f"Erro inesperado: {str(exc)}"
             return False
 
