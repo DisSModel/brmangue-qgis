@@ -10,7 +10,7 @@ REQUEST_TIMEOUT   = 30
 class BrmangueTask(QgsTask):
     """
     Background task: submit → poll → done.
-    Usa o mecanismo nativo do QgsTask para reportar conclusão.
+    Usa o mecanismo nativo do QgsTask para reportar conclusão e extrai metadados FAIR.
     """
 
     def __init__(
@@ -36,21 +36,31 @@ class BrmangueTask(QgsTask):
         self.experiment_id  = None
         self.result_uri     = None
         self.error_msg      = None
+        
+        # NOVA VARIÁVEL: Armazena os metadados de proveniência (FAIR)
+        self.fair_metadata  = {}
 
     def _log(self, msg: str, level=Qgis.Info):
         QgsMessageLog.logMessage(msg, "BR-MANGUE Task", level)
 
     def run(self) -> bool:
         """Lógica executada em background thread."""
+        self._log(">>> THREAD BACKGROUND INICIADA! <<<")
         try:
             # 1. Submissão
+            self._log("Indo para _submit()...")
             if not self._submit():
+                self._log("Falha no _submit()! Retornando False.")
                 return False
             
             # 2. Monitoramento (Polling)
+            self._log("Indo para _poll()...")
             return self._poll()
             
         except Exception as exc:
+            import traceback
+            erro = traceback.format_exc()
+            self._log(f"🔥 ERRO CRÍTICO NA THREAD: {erro}", Qgis.Critical)
             self.error_msg = f"Erro inesperado: {str(exc)}"
             return False
 
@@ -69,7 +79,6 @@ class BrmangueTask(QgsTask):
                 return False
 
             data = resp.json()
-            # Ajustado para pegar 'job_id' conforme seu código anterior
             self.experiment_id = data.get("job_id")
             
             if not self.experiment_id:
@@ -103,8 +112,15 @@ class BrmangueTask(QgsTask):
                 status = record.get("status", "unknown").lower()
 
                 if status == "completed":
-                    # Ajustado para pegar 'output_path' conforme seu código
                     self.result_uri = record.get("output_path")
+                    
+                    # CAPTURA OS METADADOS FAIR AQUI
+                    self.fair_metadata = {
+                        "model_name": record.get("model_name", "brmangue"),
+                        "code_version": record.get("code_version", "1.0"),
+                        "model_commit": record.get("model_commit", "unknown"),
+                        "output_sha256": record.get("output_sha256", "unknown")
+                    }
                     return True
 
                 if status == "failed":
@@ -128,7 +144,9 @@ class BrmangueTask(QgsTask):
         """
         if success and self.result_uri:
             self._log(f"Sucesso! Abrindo resultado: {self.result_uri}", Qgis.Success)
-            self.on_done(self.result_uri, self.experiment_id)
+            
+            # AGORA PASSAMOS O FAIR_METADATA JUNTO PARA O DIALOG
+            self.on_done(self.result_uri, self.experiment_id, self.fair_metadata)
         else:
             msg = self.error_msg or "Job interrompido."
             self._log(f"Tarefa encerrada com erro: {msg}", Qgis.Warning)

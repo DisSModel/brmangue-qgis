@@ -12,10 +12,14 @@ from qgis.PyQt.QtWidgets import (
     QSpinBox, QCheckBox, QComboBox,
     QPushButton, QLineEdit, QLabel,
     QGroupBox, QVBoxLayout, QHBoxLayout,
-    QProgressBar, QTextEdit
+    QProgressBar, QTextBrowser  # <-- Trocado de QTextEdit para QTextBrowser
 )
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsApplication, QgsMessageLog, Qgis
+
+import html as _html
+from qgis.PyQt.QtCore import QUrl
+from qgis.PyQt.QtGui  import QTextCursor, QTextCharFormat
 
 
 class BrmangueDialog(QDialog):
@@ -50,14 +54,35 @@ class BrmangueDialog(QDialog):
         return box
 
     def _group_input(self) -> QGroupBox:
-        box = QGroupBox("Dataset de Entrada")
+        box    = QGroupBox("Dataset de Entrada")
         layout = QFormLayout(box)
+
+        # Layout horizontal para a URI e o botão Preview lado a lado
+        uri_layout = QHBoxLayout()
+
         self.input_uri = QLineEdit()
         self.input_uri.setPlaceholderText("s3://dissmodel-inputs/ilha_maranhao.tif")
+
+        # Criação do botão de Preview aqui
+        self.btn_preview = QPushButton("👀 Preview")
+        self.btn_preview.setToolTip("Carrega o dataset no mapa antes de simular")
+        self.btn_preview.clicked.connect(self._preview)
+
+        # Adiciona o campo de texto e o botão ao layout horizontal
+        uri_layout.addWidget(self.input_uri)
+        uri_layout.addWidget(self.btn_preview)
+
         self.input_format = QComboBox()
         self.input_format.addItems(["auto", "tiff", "vector"])
-        layout.addRow("URI do dataset:", self.input_uri)
-        layout.addRow("Formato:", self.input_format)
+        self.input_format.setToolTip(
+            "auto: detecta pelo sufixo do arquivo\n"
+            "tiff: GeoTIFF com bandas uso/alt/solo\n"
+            "vector: GeoPackage ou Shapefile rasterizado no servidor"
+        )
+
+        layout.addRow("URI do dataset:", uri_layout)
+        layout.addRow("Formato:",        self.input_format)
+        
         return box
 
     def _group_parameters(self) -> QGroupBox:
@@ -99,10 +124,17 @@ class BrmangueDialog(QDialog):
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
-        self.log = QTextEdit()
+        
+        # ── CONFIGURAÇÃO PARA LINKS CLICÁVEIS ──
+        self.log = QTextBrowser()
         self.log.setReadOnly(True)
-        self.log.setFixedHeight(90)
+        self.log.setFixedHeight(100)
         self.log.setStyleSheet("font-size: 11px; font-family: monospace;")
+        
+        # Faz com que o QGIS gerencie os cliques em vez do navegador do sistema
+        self.log.setOpenExternalLinks(False)
+        self.log.anchorClicked.connect(self._handle_log_link)
+        
         self._log("Aguardando submissão.")
         layout.addWidget(self.progress)
         layout.addWidget(self.log)
@@ -110,11 +142,14 @@ class BrmangueDialog(QDialog):
 
     def _buttons(self) -> QHBoxLayout:
         layout = QHBoxLayout()
-        self.btn_submit = QPushButton("▶ Submeter Job")
+
+        self.btn_submit = QPushButton("▶  Submeter Job")
         self.btn_submit.setDefault(True)
         self.btn_submit.clicked.connect(self._submit)
+
         self.btn_close = QPushButton("Fechar")
         self.btn_close.clicked.connect(self.close)
+
         layout.addStretch()
         layout.addWidget(self.btn_submit)
         layout.addWidget(self.btn_close)
@@ -122,43 +157,74 @@ class BrmangueDialog(QDialog):
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
-    def _submit(self):
-        """Prepara o payload e lança a QgsTask."""
-        import json
-        from .payload_builder import build_payload
-        from .task import BrmangueTask
-
-        params = self._collect_params()
+    def _preview(self):
+        uri = self.input_uri.text().strip()
+        api_key = self.api_key.text().strip()
+        server_url = self.server_url.text().strip().rstrip("/")
         
-        # Validação simples
-        if not params["input_uri"] or not params["api_key"]:
-            self._log("❌ Erro: Preencha a URI e a API Key.")
+        # 1. Trava da URI
+        if not uri:
+            self._log("❌ Erro: Insira a URI do dataset para pré-visualizar.")
+            return
+            
+        # 2. Trava da API Key
+        if not api_key:
+            self._log("❌ Erro: Insira a API Key (chave de acesso) para baixar a pré-visualização.")
             return
 
-        payload = build_payload(params)
+        self._log(f"👀 Carregando pré-visualização de {uri}...")
         
-        # Log no console do QGIS para debug
-        QgsMessageLog.logMessage(f"Payload: {json.dumps(payload)}", "BR-MANGUE", Qgis.Info)
-
-        self._log(f"Submetendo job para {params['server_url']} ...")
-        self._set_running(True)
+        # Pega as bandas que o usuário marcou para visualizar
+        bands = []
+        if self.band_uso.isChecked():  bands.append("uso")
+        if self.band_solo.isChecked(): bands.append("solo")
+        if self.band_alt.isChecked():  bands.append("alt")
 
         try:
-            # Criamos a tarefa passando nossas funções locais de callback
-            task = BrmangueTask(
+            from .symbology import load_result
+            # Chama a mesma função, mas passa "Preview Entrada" em vez de um Job ID
+            load_result(uri, "Preview Entrada", bands, server_url, api_key)
+            self._log("✅ Pré-visualização carregada com sucesso!")
+        except Exception as e:
+            self._log(f"❌ Erro ao carregar pré-visualização: {str(e)}")
+
+
+    def _submit(self):
+        try:
+            import json
+            from .payload_builder import build_payload
+            from .task import BrmangueTask
+
+            params = self._collect_params()
+            
+            if not params["input_uri"] or not params["api_key"]:
+                self._log("❌ Erro: Preencha a URI e a API Key.")
+                return
+
+            payload = build_payload(params)
+            
+            QgsMessageLog.logMessage(f"Payload: {json.dumps(payload)}", "BR-MANGUE", Qgis.Info)
+
+            self._log(f"Submetendo job para {params['server_url']} ...")
+            self._set_running(True)
+            
+            self.active_task = BrmangueTask(
                 payload    = payload,
                 server_url = params["server_url"],
                 api_key    = params["api_key"],
                 bands      = params["bands"],
-                on_done    = self._on_done,    # Será chamada pela thread principal
-                on_error   = self._on_error    # Será chamada pela thread principal
+                on_done    = self._on_done,    
+                on_error   = self._on_error    
             )
             
-            QgsApplication.taskManager().addTask(task)
+            QgsApplication.taskManager().addTask(self.active_task)
             self._log("Job enviado! Monitorando servidor...")
             
         except Exception as e:
-            self._log(f"❌ Erro ao criar Task: {str(e)}")
+            import traceback
+            erro_completo = traceback.format_exc()
+            self._log(f"🔥 ERRO CRÍTICO ANTES DE ENVIAR: {str(e)}")
+            QgsMessageLog.logMessage(erro_completo, "BR-MANGUE", Qgis.Critical)
             self._set_running(False)
 
     def _collect_params(self) -> dict:
@@ -181,17 +247,37 @@ class BrmangueDialog(QDialog):
 
     # ── Callbacks (Chamados via task.finished na Thread Principal) ───────────
 
-    def _on_done(self, result_uri: str, experiment_id: str):
+    def _handle_log_link(self, url):
+        # Cancela a navegação imediatamente — sem isso o QTextBrowser
+        # "navega" para a URL e limpa o conteúdo do widget.
+        self.log.setSource(QUrl())
+
+        experiment_id = url.toString()
+        server_url = self.server_url.text().strip().rstrip("/")
+        api_key    = self.api_key.text().strip()
+
+        if server_url and api_key:
+            from .experiment_panel import ExperimentPanel
+            panel = ExperimentPanel(experiment_id, server_url, api_key, parent=self)
+            panel.exec_()
+        else:
+            self._log("❌ URL do servidor e API Key são necessárias para consultar o experimento.")
+
+    def _on_done(self, result_uri: str, experiment_id: str, fair_metadata: dict = None):
         """Executado quando a tarefa termina com sucesso."""
         self._set_running(False)
-        self._log(f"✅ Concluído — ID: {experiment_id}")
-        self._log(f"📂 Abrindo camada: {result_uri}")
+        
+        # ── CRIA O LINK HTML CLICÁVEL ──
+        link_html = f'<a href="{experiment_id}" style="color: #3498db; text-decoration: underline;">{experiment_id}</a>'
+        self.log.append(f"✅ Concluído — ID: {link_html}")
+        self.log.append(f"📂 Abrindo camada...")
 
         try:
             from .symbology import load_result
             load_result(
                 result_uri,
                 experiment_id,
+                bands      = self._collect_params()["bands"],
                 server_url = self.server_url.text().strip().rstrip("/"),
                 api_key    = self.api_key.text().strip(),
             )
@@ -207,8 +293,22 @@ class BrmangueDialog(QDialog):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _log(self, message: str):
-        self.log.append(message)
-        # Scroll para o final automático
+        cursor = self.log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.log.setTextCursor(cursor)
+
+        if "<a " in message:
+            # Insere o HTML do link
+            self.log.insertHtml(message + "<br/>")
+            # Move para o fim e RESETA o formato — quebra o contexto do <a>
+            cursor = self.log.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.setCharFormat(QTextCharFormat())   # sem cor, sem sublinhado
+            self.log.setTextCursor(cursor)
+        else:
+            # Texto puro: escapa e insere como HTML neutro
+            self.log.insertHtml(_html.escape(message) + "<br/>")
+
         self.log.ensureCursorVisible()
 
     def _set_running(self, running: bool):

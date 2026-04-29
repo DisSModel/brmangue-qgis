@@ -36,27 +36,48 @@ SOLO_LABELS = {
 STYLES_DIR = os.path.join(os.path.dirname(__file__), "styles")
 BAND_STYLES = {"uso": "brmangue_uso.qml", "solo": "brmangue_solo.qml", "alt": "brmangue_alt.qml"}
 
-def load_result(result_uri: str, experiment_id: str, bands: list[str] | None = None,
+
+
+def load_result(result_uri: str, prefix: str, bands: list[str] | None = None,
                 server_url: str = "http://127.0.0.1:8000", api_key: str = ""):
     
     bands_to_load = bands if bands else ["uso", "solo", "alt"]
+    
+    # 1. Busca a URL pré-assinada no servidor
     path = _resolve_vsi_path(result_uri, server_url, api_key)
     if not path:
-        return
+        raise ValueError("O servidor não retornou uma URL válida para download.")
+
+    import os
+    # Força o QGIS a fazer GET direto, essencial para URLs pré-assinadas (S3/MinIO)
+    os.environ["CPL_VSIL_CURL_USE_HEAD"] = "NO"
+
+    loaded_any = False
 
     for band_name in bands_to_load:
         band_index = BAND_MAP.get(band_name)
         if not band_index:
             continue
 
-        layer_name = f"{experiment_id} — {band_name}"
-        layer = QgsRasterLayer(path, layer_name)
+        layer_name = f"{prefix} — {band_name}"
+        
+        # 2. SEGREDO: O terceiro argumento ("gdal") é obrigatório para o QGIS 
+        # entender URLs com parâmetros de query string (?X-Amz...)
+        layer = QgsRasterLayer(path, layer_name, "gdal")
 
+        # 3. Lógica de validação defensiva
         if not layer.isValid():
+            from qgis.core import QgsMessageLog, Qgis
+            QgsMessageLog.logMessage(f"O GDAL recusou o arquivo. Caminho tentado: {path}", "BR-MANGUE", Qgis.Warning)
             continue
 
         _apply_style_smart(layer, band_name, band_index)
         QgsProject.instance().addMapLayer(layer)
+        loaded_any = True
+        
+    # 4. Se passou pelas 3 bandas e nenhuma abriu, aborta e avisa a interface
+    if not loaded_any:
+        raise RuntimeError("O QGIS não conseguiu renderizar o TIF a partir da URL fornecida. Verifique o Painel de Mensagens do QGIS para mais detalhes.")
 
 def _apply_style_smart(layer: QgsRasterLayer, band_name: str, band_index: int):
     """Plano A: Carrega QML. Plano B: Gera simbologia programática."""
