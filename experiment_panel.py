@@ -113,7 +113,7 @@ class ExperimentPanel(QDialog):
 
         # 3. Construindo a Citação
         code_ver = self.record.get("code_version", "1.0")
-        model_name = self.record.get("model_name", "brmangue")
+        model_name = self.record.get("model_name", "brmangue_raster")
         out_sha_short = str(out_sha)[:12] if out_sha != "N/A" else "unknown"
         
         citation = (
