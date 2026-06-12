@@ -4,7 +4,7 @@ qgisMinimumVersion=3.16
 qgisMaximumVersion=3.99
 description=Submit and visualize BR-MANGUE coastal flood and mangrove dynamics simulations via the DisSModel Platform.
 about=brmangue-qgis is a QGIS interface for the BR-MANGUE simulation model, built on the DisSModel ecosystem (LambdaGeo / UFMA). It submits jobs to a remote DisSModel Platform server, polls for completion, downloads the GeoTIFF result, and applies automatic band symbology (land use, soil, elevation) directly in the QGIS canvas. No local installation of dissmodel or brmangue-dissmodel is required — the science runs on the server.
-version=0.1.0
+version=0.2.0
 author=Sérgio Costa, Nerval Santos Júnior — LambdaGeo / UFMA
 email=sergio.costa@ufma.br
 homepage=https://github.com/DisSModel/brmangue-qgis
@@ -17,4 +17,5 @@ deprecated=False
 category=Raster
 hasProcessingProvider=no
 changelog=
+    0.2.0 - Align with brmangue-dissmodel 0.2.0 (executor renamed to brmangue_raster).
     0.1.0 - Initial release. Submit jobs, poll status, load result with automatic symbology.

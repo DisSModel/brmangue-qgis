@@ -116,7 +116,7 @@ class BrmangueTask(QgsTask):
                     
                     # CAPTURA OS METADADOS FAIR AQUI
                     self.fair_metadata = {
-                        "model_name": record.get("model_name", "brmangue"),
+                        "model_name": record.get("model_name", "brmangue_raster"),
                         "code_version": record.get("code_version", "1.0"),
                         "model_commit": record.get("model_commit", "unknown"),
                         "output_sha256": record.get("output_sha256", "unknown")
