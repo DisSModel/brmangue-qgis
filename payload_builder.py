@@ -11,7 +11,7 @@ from __future__ import annotations
 
 def build_payload(params: dict) -> dict:
     payload = {
-        "model_name":    "brmangue",
+        "model_name":    "brmangue_raster",
         "input_dataset": params["input_uri"],
         "input_format":  params.get("input_format", "auto"),
         "parameters": {
